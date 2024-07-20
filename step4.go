@@ -46,13 +46,13 @@ func handleTaskPOST(w http.ResponseWriter, r *http.Request) {
 		if parsedDate.Before(time.Now()) {
 			//		if task.Repeat == "" {
 			task.Date = time.Now().Format("20060102")
-		} else {
+		} /*else {
 			task.Date, err = NextDate(time.Now(), task.Date, task.Repeat)
 			if err != nil {
 				sendErrorResponse(w, err.Error())
 				return
 			}
-		}
+		}*/
 	} else {
 		task.Date = time.Now().Format("20060102")
 	}

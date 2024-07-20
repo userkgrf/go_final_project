@@ -1,12 +1,11 @@
 package main
 
 /*
-Шаг 2 реализован в main.go
+import "path/filepath"
 
 import (
 	"database/sql"
 	"log"
-	"path/filepath"
 )
 
 func workDb(appPath string) {
