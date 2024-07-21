@@ -1,9 +1,7 @@
-package main
+package repository
 
 import (
 	"errors"
-	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 )
@@ -61,26 +59,4 @@ func NextDate(now time.Time, date string, repeat string) (string, error) {
 	default:
 		return "", errors.New("Unsupported repeat rule format: " + repeat)
 	}
-}
-
-func handleNextDate(w http.ResponseWriter, r *http.Request) {
-	nowStr := r.FormValue("now")
-	dateStr := r.FormValue("date")
-	repeat := r.FormValue("repeat")
-	now, err := time.Parse("20060102", nowStr)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Invalid 'now' format: %s", err), http.StatusBadRequest)
-		return
-	}
-	_, err = time.Parse("20060102", dateStr)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Invalid 'date' format: %s", err), http.StatusBadRequest)
-		return
-	}
-	nextDate, err := NextDate(now, dateStr, repeat)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error calculating next date: %s", err), http.StatusBadRequest)
-		return
-	}
-	fmt.Fprintln(w, nextDate)
 }
