@@ -1,25 +1,33 @@
-package main
+package handlers
 
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"main.go/repository"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
+
+	"final_project/repository"
+	"final_project/taskRepRules"
 )
 
-func handleNextDate() http.HandlerFunc {
+type Handler struct {
+	Repo *repository.Repository
+}
+
+type Response struct {
+	Error string `json:"error,omitempty"`
+}
+
+const timeLayout = "20060102"
+const maxTasksPerPage = 50
+
+func HandleNextDate() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		nowStr := r.FormValue("now")
 		dateStr := r.FormValue("date")
 		repeat := r.FormValue("repeat")
-		now, err := time.Parse("20060102", nowStr)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Invalid 'now' format: %s", err), http.StatusBadRequest)
-			return
-		}
 		if nowStr == "" {
 			http.Error(w, "Missing 'now' parameter", http.StatusBadRequest)
 			return
@@ -32,21 +40,30 @@ func handleNextDate() http.HandlerFunc {
 			http.Error(w, "Missing 'repeat' parameter", http.StatusBadRequest)
 			return
 		}
-		_, err = time.Parse("20060102", dateStr)
+		now, err := time.Parse(timeLayout, nowStr)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Invalid 'now' format: %s", err), http.StatusBadRequest)
+			return
+		}
+		_, err = time.Parse(timeLayout, dateStr)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Invalid 'date' format: %s", err), http.StatusBadRequest)
 			return
 		}
-		nextDate, err := repository.NextDate(now, dateStr, repeat)
+		nextDate, err := taskRepRules.NextDate(now, dateStr, repeat)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Error calculating next date: %s", err), http.StatusBadRequest)
 			return
 		}
-		fmt.Fprintln(w, nextDate)
+		_, err = fmt.Fprintln(w, nextDate)
+		if err != nil {
+			http.Error(w, "Error writing response: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
-func handleTaskPOST(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleTaskPOST(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
@@ -62,34 +79,27 @@ func handleTaskPOST(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if task.Date != "" {
-		_, err = time.Parse("20060102", task.Date)
+		_, err = time.Parse(timeLayout, task.Date)
 		if err != nil {
 			sendErrorResponse(w, "Invalid 'date' format")
 			return
 		}
-		parsedDate, _ := time.Parse("20060102", task.Date)
+		parsedDate, _ := time.Parse(timeLayout, task.Date)
 		if parsedDate.Before(time.Now()) {
-			//		if task.Repeat == "" {
-			task.Date = time.Now().Format("20060102")
-		} /*else {
-			task.Date, err = NextDate(time.Now(), task.Date, task.Repeat)
-			if err != nil {
-				sendErrorResponse(w, err.Error())
-				return
-			}
-		}*/
+			task.Date = time.Now().Format(timeLayout)
+		}
 	} else {
-		task.Date = time.Now().Format("20060102")
+		task.Date = time.Now().Format(timeLayout)
 	}
 	if task.Repeat != "" {
-		_, err = repository.NextDate(time.Now(), task.Date, task.Repeat)
+		_, err = taskRepRules.NextDate(time.Now(), task.Date, task.Repeat)
 		if err != nil {
 			sendErrorResponse(w, err.Error())
 			return
 		}
 	}
 
-	id, err := repo.InsertTask(&task)
+	id, err := h.Repo.InsertTask(&task)
 	if err != nil {
 		sendErrorResponse(w, "Error inserting task: "+err.Error())
 		return
@@ -97,7 +107,7 @@ func handleTaskPOST(w http.ResponseWriter, r *http.Request) {
 	sendSuccessResponse(w, id)
 }
 
-func handleTasksGET(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleTasksGET(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
@@ -107,24 +117,26 @@ func handleTasksGET(w http.ResponseWriter, r *http.Request) {
 	var date time.Time
 	var err error
 	if dateStr != "" {
-		date, err = time.Parse("20060102", dateStr)
+		date, err = time.Parse(timeLayout, dateStr)
 		if err != nil {
 			sendErrResponse(w, "Invalid date format: "+err.Error())
 			return
 		}
 	}
 
-	tasks, err := repo.GetTasks(date, 50)
+	tasks, err := h.Repo.GetTasks(date, maxTasksPerPage)
 	if err != nil {
 		sendErrResponse(w, "Error getting tasks: "+err.Error())
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	json.NewEncoder(w).Encode(map[string]interface{}{"tasks": tasks})
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{"tasks": tasks}); err != nil {
+		sendErrResponse(w, "Error encoding response: "+err.Error())
+		return
+	}
 }
 
-func handleTaskGET(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleTaskGET(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	idParam := r.URL.Query().Get("id")
 	if idParam == "" {
@@ -137,23 +149,51 @@ func handleTaskGET(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := repo.GetTask(id)
+	task, err := h.Repo.GetTask(id)
 	if err != nil {
 		sendErrorResponse(w, err.Error())
 		return
 	}
-	json.NewEncoder(w).Encode(task)
+	err = json.NewEncoder(w).Encode(task)
+	if err != nil {
+		sendErrorResponse(w, "Error encoding response: "+err.Error())
+		return
+	}
 }
 
-func handleTaskPUT(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+func (h *Handler) HandlerMarkTaskDone(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "The task ID is not specified", http.StatusBadRequest)
+		return
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid format of the task ID", http.StatusBadRequest)
+		return
+	}
+	err = h.Repo.MarkTaskDone(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
 
-	body, err := ioutil.ReadAll(r.Body)
+func (h *Handler) HandleTaskPUT(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		sendErrorResponse(w, "Error reading the request body: "+err.Error())
 		return
 	}
-	defer r.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			sendErrorResponse(w, "Error closing the request body: "+err.Error())
+			return
+		}
+	}(r.Body)
 
 	var task repository.Task
 	err = json.Unmarshal(body, &task)
@@ -166,7 +206,7 @@ func handleTaskPUT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if task.Date != "" {
-		parsedDate, err := time.Parse("20060102", task.Date)
+		parsedDate, err := time.Parse(timeLayout, task.Date)
 		if err != nil {
 			sendErrorResponse(w, "Invalid 'date' format")
 			return
@@ -174,28 +214,28 @@ func handleTaskPUT(w http.ResponseWriter, r *http.Request) {
 
 		if parsedDate.Before(time.Now()) {
 			if task.Repeat != "" {
-				task.Date, err = repository.NextDate(time.Now(), task.Date, task.Repeat)
+				task.Date, err = taskRepRules.NextDate(time.Now(), task.Date, task.Repeat)
 				if err != nil {
 					sendErrorResponse(w, err.Error())
 					return
 				}
 			} else {
-				task.Date = time.Now().Format("20060102")
+				task.Date = time.Now().Format(timeLayout)
 			}
 		}
 	} else {
-		task.Date = time.Now().Format("20060102")
+		task.Date = time.Now().Format(timeLayout)
 	}
 
 	if task.Repeat != "" {
-		_, err = repository.NextDate(time.Now(), task.Date, task.Repeat)
+		_, err = taskRepRules.NextDate(time.Now(), task.Date, task.Repeat)
 		if err != nil {
 			sendErrorResponse(w, err.Error())
 			return
 		}
 	}
 
-	rowsAffected, err := repo.UpdateTask(&task)
+	rowsAffected, err := h.Repo.UpdateTask(&task)
 	if err != nil {
 		sendErrorResponse(w, err.Error())
 		return
@@ -207,7 +247,7 @@ func handleTaskPUT(w http.ResponseWriter, r *http.Request) {
 	sendSuccessResp(w)
 }
 
-func handleTaskDone(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleTaskDone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
@@ -225,65 +265,83 @@ func handleTaskDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = repo.MarkTaskDone(id)
+	err = h.Repo.MarkTaskDone(id)
 	if err != nil {
 		sendErrorResponse(w, err.Error())
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{})
+	err = json.NewEncoder(w).Encode(map[string]interface{}{})
+	if err != nil {
+		sendErrorResponse(w, "Error encoding response: "+err.Error())
+		return
+	}
 }
 
-func handleTaskDelete(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleTaskDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "DELETE" {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
 	idStr := r.URL.Query().Get("id")
 	if idStr == "" {
 		sendErrorResponse(w, "The task ID is not specified")
 		return
 	}
-
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		sendErrorResponse(w, "Invalid format of the task ID")
 		return
 	}
-
-	err = repo.DeleteTask(id)
+	err = h.Repo.DeleteTask(id)
 	if err != nil {
 		sendErrorResponse(w, err.Error())
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{})
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{}); err != nil {
+		sendErrorResponse(w, "Error encoding response: "+err.Error())
+		return
+	}
 }
 
 func sendSuccessResp(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-	})
+	}); err != nil {
+		http.Error(w, "Error encoding response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func sendErrResponse(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	w.WriteHeader(http.StatusBadRequest)
-	json.NewEncoder(w).Encode(map[string]interface{}{"error": message})
+	errResponse := map[string]interface{}{"error": message}
+	err := json.NewEncoder(w).Encode(errResponse)
+	if err != nil {
+		http.Error(w, "Error encoding response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func sendErrorResponse(w http.ResponseWriter, err string) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	json.NewEncoder(w).Encode(repository.Response{Error: err})
+	w.WriteHeader(http.StatusInternalServerError)
+	if err := json.NewEncoder(w).Encode(Response{Error: err}); err != nil {
+		_, err := io.WriteString(w, "Failed to encode error response: "+err.Error())
+		if err != nil {
+			http.Error(w, "Error writing error response: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 }
 
 func sendSuccessResponse(w http.ResponseWriter, id int64) {
 	w.Header().Set("Content-Type", "application/json")
-	// Add logging to see the JSON output
 	data, err := json.Marshal(map[string]interface{}{
 		"success": true,
 		"id":      id,
@@ -292,9 +350,11 @@ func sendSuccessResponse(w http.ResponseWriter, id int64) {
 		sendErrorResponse(w, "Error marshalling JSON response: "+err.Error())
 		return
 	}
-	fmt.Println("Sending response:", string(data)) // Log the response data
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"id":      id,
-	})
+
+	_, err = w.Write(data)
+	if err != nil {
+		sendErrorResponse(w, "Error writing JSON response: "+err.Error())
+		return
+	}
+	fmt.Println("Sending response:", string(data))
 }

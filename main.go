@@ -2,47 +2,49 @@ package main
 
 import (
 	"fmt"
-	"github.com/go-chi/chi/v5"
 	"log"
-	"main.go/repository"
 	"net/http"
-)
 
-var repo *repository.Repository
+	"github.com/go-chi/chi"
+
+	"final_project/handlers"
+	"final_project/repository"
+)
 
 func main() {
 	port := "7540"
 	webDir := "./web"
-
+	var repo *repository.Repository
 	var err error
 	repo, err = repository.NewRepository("./scheduler.db")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer repo.Close()
+	handler := handlers.Handler{Repo: repo}
 
 	server := chi.NewRouter()
 	server.Mount("/", http.FileServer(http.Dir(webDir)))
 
-	server.Get("/api/nextdate", handleNextDate())
+	server.Get("/api/nextdate", handlers.HandleNextDate())
 	server.HandleFunc("/api/task", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			handleTaskGET(w, r)
+			handler.HandleTaskGET(w, r)
 		case http.MethodPost:
-			handleTaskPOST(w, r)
+			handler.HandleTaskPOST(w, r)
 		case http.MethodPut:
-			handleTaskPUT(w, r)
+			handler.HandleTaskPUT(w, r)
 		case http.MethodDelete:
-			handleTaskDelete(w, r)
+			handler.HandleTaskDelete(w, r)
 		default:
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		}
 	})
-	server.HandleFunc("/api/task/done", handleTaskDone)
+	server.HandleFunc("/api/task/done", handler.HandleTaskDone)
 	server.HandleFunc("/api/tasks", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
-			handleTasksGET(w, r)
+			handler.HandleTasksGET(w, r)
 		} else {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		}

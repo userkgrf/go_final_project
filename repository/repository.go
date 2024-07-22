@@ -3,9 +3,11 @@ package repository
 import (
 	"database/sql"
 	"fmt"
-	_ "github.com/mattn/go-sqlite3"
-	"strconv"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3"
+
+	"final_project/taskRepRules"
 )
 
 type Task struct {
@@ -18,10 +20,6 @@ type Task struct {
 
 type Repository struct {
 	db *sql.DB
-}
-
-type Response struct {
-	Error string `json:"error,omitempty"`
 }
 
 func NewRepository(dbPath string) (*Repository, error) {
@@ -47,7 +45,7 @@ func (r *Repository) InsertTask(task *Task) (int64, error) {
 	return id, nil
 }
 
-func (r *Repository) GetTasks(date time.Time, limit int) ([]map[string]string, error) {
+func (r *Repository) GetTasks(date time.Time, limit int) ([]Task, error) {
 	var query string
 	var args []interface{}
 	if !date.IsZero() {
@@ -64,7 +62,7 @@ func (r *Repository) GetTasks(date time.Time, limit int) ([]map[string]string, e
 	}
 	defer rows.Close()
 
-	var tasks []map[string]string
+	var tasks []Task
 	for rows.Next() {
 		var id int64
 		var date, title, comment, repeat string
@@ -72,17 +70,19 @@ func (r *Repository) GetTasks(date time.Time, limit int) ([]map[string]string, e
 		if err != nil {
 			return nil, err
 		}
-		task := map[string]string{
-			"id":      strconv.FormatInt(id, 10),
-			"date":    date,
-			"title":   title,
-			"comment": comment,
-			"repeat":  repeat,
+
+		task := Task{
+			ID:      fmt.Sprintf("%d", id), // Преобразование int64 в string
+			Date:    date,
+			Title:   title,
+			Comment: comment,
+			Repeat:  repeat,
 		}
+
 		tasks = append(tasks, task)
 	}
 	if tasks == nil {
-		tasks = []map[string]string{}
+		tasks = []Task{}
 	}
 	return tasks, nil
 }
@@ -130,7 +130,7 @@ func (r *Repository) MarkTaskDone(id int64) error {
 	}
 
 	if task.Repeat != "" {
-		nextDate, err := NextDate(time.Now(), task.Date, task.Repeat) // Assuming you have a NextDate function defined
+		nextDate, err := taskRepRules.NextDate(time.Now(), task.Date, task.Repeat) // Assuming you have a NextDate function defined
 		if err != nil {
 			return fmt.Errorf("error in calculating the next date: %w", err)
 		}
@@ -146,7 +146,6 @@ func (r *Repository) MarkTaskDone(id int64) error {
 			return fmt.Errorf("error deleting a task: %w", err)
 		}
 	}
-
 	return nil
 }
 
