@@ -61,6 +61,7 @@ func HandleNextDate() http.HandlerFunc {
 			log.Printf("Error writing response: %s", err.Error())
 			return
 		}
+
 	}
 }
 
