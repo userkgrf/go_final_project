@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -57,9 +58,10 @@ func HandleNextDate() http.HandlerFunc {
 		}
 		_, err = fmt.Fprintln(w, nextDate)
 		if err != nil {
-			http.Error(w, "Error writing response: "+err.Error(), http.StatusInternalServerError)
+			log.Printf("Error writing response: %s", err.Error())
 			return
 		}
+
 	}
 }
 
@@ -177,7 +179,11 @@ func (h *Handler) HandlerMarkTaskDone(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusOK) // Возвращаем статутс 200 ОК с сообщением об успехе
+	_, err = w.Write([]byte(`{"success": true, "message": "Task marked as done"}`))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (h *Handler) HandleTaskPUT(w http.ResponseWriter, r *http.Request) {
@@ -331,12 +337,11 @@ func sendErrResponse(w http.ResponseWriter, message string) {
 func sendErrorResponse(w http.ResponseWriter, err string) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	w.WriteHeader(http.StatusInternalServerError)
-	if err := json.NewEncoder(w).Encode(Response{Error: err}); err != nil {
-		_, err := io.WriteString(w, "Failed to encode error response: "+err.Error())
-		if err != nil {
-			http.Error(w, "Error writing error response: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
+
+	log.Printf("Error: %s", err)
+
+	if err := json.NewEncoder(w).Encode(Response{Error: "Internal Server Error"}); err != nil {
+		http.Error(w, "Failed to encode error response", http.StatusInternalServerError)
 	}
 }
 
@@ -353,8 +358,7 @@ func sendSuccessResponse(w http.ResponseWriter, id int64) {
 
 	_, err = w.Write(data)
 	if err != nil {
-		sendErrorResponse(w, "Error writing JSON response: "+err.Error())
-		return
+		log.Printf("Error writing JSON response: %s", err.Error())
 	}
 	fmt.Println("Sending response:", string(data))
 }
