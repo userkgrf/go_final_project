@@ -81,7 +81,7 @@ func (r *Repository) GetTasks(date time.Time, limit int) ([]Task, error) {
 
 		tasks = append(tasks, task)
 	}
-	if tasks == nil {
+	if tasks == nil { // Тесты не проходят, если убрать этот кейс . Вылетает ошибка: Error: Expected value not to be nil.
 		tasks = []Task{}
 	}
 	return tasks, nil
